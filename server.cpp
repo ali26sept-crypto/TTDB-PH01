@@ -44,30 +44,50 @@ class Stack
 
 public:
     // Implement these functions:
-    Stack()
+    Stack():top(nullptr), count(0)
     { // initialize the stack
     }
     void push(const T &val)
     {
-
+      if(count>=MAX_STACK_DEPTH) {
+        return ;
+      }
+      Node *n = new Node(val,top);
+      top = n;
+      count++;
         // pushes the value on the stack if max limit is not reached yet.
     }
     T pop()
     {
+         while(!isempty()) {
+            pop(); // if the stack is full, pop the top value to make space for new value
+        }
         // pop the top value on the stack
     }
     T &peek()
     {
+        return top->data;
         // returns the top value on the stack
     }
     bool isEmpty()
     {
+        return count == 0;
     }
     int32_t depth()
     {
+        return count;
+        // returns the current depth of the stack
     }
     int32_t snapshot_into(T out[], int32_t maxLen)
     {
+        int32_t written = 0;
+        node *current = top;
+        while (current != nullptr && written < maxLen)
+        {
+            out[written++] = current->data;
+            current = current->next;
+        }
+        return written;
         // copies every frame, top to bottom in the array given as a parameter
         // this is what buildSnapshot() call, returns count written
     }
