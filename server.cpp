@@ -109,18 +109,36 @@ class Timeline
 
 public:
     // Implement these functions
-    Timeline()
+    Timeline():head(nullptr), tail(nullptr), stepCount(0)
     {
     }
     void record(Snapshot *s)
     {
+        if (stepCount >= MAX_SOURCE_BYTES)
+        {
+            return; // if the timeline is full, do not record any more snapshots
+        }
+        else if (head == nullptr)
+        {
+            head = new TimelineNode{s, nullptr, nullptr};
+            tail = head;
+        }
+        else
+        {
+            TimelineNode *n = new TimelineNode{s, nullptr, tail};
+            tail->next = n;
+            tail = n;
+        }
+        stepCount++;
         // add record in the timeline
     }
     TimelineNode *begin()
     {
+        return head;
     }
     int32_t getStepCount()
     {
+        return stepCount;
     }
 };
 
@@ -176,18 +194,78 @@ struct PendingPatch
 // PASS 0x0: READING source.bin + VALIDITY CHECK
 bool readSourceLine(ifstream &in, string &out)
 {
+    string line;
+    while(getline(in, line))
+    {
+        size_t start = 0;
+        if (start ==  line.size())
+            continue;
+
+        while(start < line.size() && (line[start] == ' '))
+            start++;
+        size_t end = line.size() - 1;
+        out = line.substr(start, end - start + 1);
+        return true;
+    }
+    return false;
     // reads the next nonblank line
 }
 string firstWord(const string &line)
 {
+    size_t st=0;
+    while(st<line.size() && line[st]==' ') //this is skipping all the spaces that are there before the first word
+        st++;
+    size_t end=st; //isma i am finding the size of the word from the moment it started
+    while(st<line.size() && line[st]!=' ')
+        st++;
+    return line.substr(st,end-st);   
     // returns first word from the input string
 }
 string secondWord(const string &line)
 {
+     size_t st=0;
+    while(st<line.size() && line[st]==' ') //this is skipping all the spaces that are there before the first word
+        st++;
+    size_t end=st; //isma i am finding the size of the word from the moment it started
+    while(st<line.size() && line[st]!=' ')
+        st++;   
+    size_t st2=st; //this is skipping all the spaces that are there before the second word
+    while(st2<line.size() && line[st2]==' ')
+        st2++;
+    size_t end2=st2; //isma i am finding the size of the word from the moment it started
+    while(st2<line.size() && line[st2]!=' ')
+        st2++;
+    return line.substr(st2,end2-st2);  
     // returns the second word
 }
 bool validateProgram(const char *sourcePath)
 {
+    ifstream in(sourcePath, ios::binary);
+    if(!in.is_open())
+    {
+        return false;
+    }
+    bool infunc=false;
+    string line;
+    while(readSourceLine(in, line))
+    {
+        string f=firstWord(line);
+        if(f=="func")
+        {
+            if(infunc)
+            {
+                return false; 
+            }
+            infunc=true;
+        }
+        else if(f=="func_end")
+        {
+            if(!infunc)
+            {
+                return false; 
+            }
+            infunc=false;
+        }
     // for each func defined there should be exactly one func_end and no nested funcs allowed - 
 }
 
