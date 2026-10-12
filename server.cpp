@@ -272,11 +272,33 @@ bool validateProgram(const char *sourcePath)
 // PASS 0x1: RESOLVE() -> resolve.bin
 int64_t writeResolveRecord(FILE *f, int64_t offsetField, const string &text)
 {
+    int64_t p = ftell(f);
+    int32_t len = text.length();
+
+    fwrite(&offsetField, sizeof(int64_t), 1, f);
+    fwrite(&len, sizeof(int32_t), 1, f);
+    if (len > 0)
+    {
+        fwrite(text.c_str(), 1, len, f);
+    }
+    return p;
     // writes one [offset(8B)][size(4B)][string] record at the current file position
     // returns this record's own starting byte position
 }
 int64_t readResolveRecord(FILE *f, string &outText)
 {
+    int64_t off = 0;
+    int32_t len = 0;
+
+    if (fread(&off, sizeof(int64_t), 1, f) != 1) return -1;
+    if (fread(&len, sizeof(int32_t), 1, f) != 1) return -1;
+
+    outText.resize(len);
+    if (len > 0)
+    {
+        fread(&outText[0], 1, len, f);
+    }
+    return off;
     // reads one record at the current position and advances past it, returns the offset field - the raw line text comes back untouched in outText.
 }
 int64_t resolveProgram(const char *sourcePath, const char *resolveBinPath)
@@ -285,6 +307,78 @@ int64_t resolveProgram(const char *sourcePath, const char *resolveBinPath)
     int32_t funcCount = 0;
     PendingPatch patches[MAX_PATCHES];
     int32_t patchCount = 0;
+    ifstream fin(sourcePath);
+    if (!fin.is_open()) return -1;
+
+    FILE *fout = fopen(resolveBinPath, "wb+");
+    if (!fout)
+    {
+        fin.close();
+        return -1;
+    }
+
+    string str;
+    int64_t mainPos = -1;
+
+    while (readSourceLine(fin, str))
+    {
+        string w1 = firstWord(str);
+        string w2 = secondWord(str);
+
+        int64_t cur = ftell(fout);
+
+        if (w1 == "func")
+        {
+            if (funcCount < MAX_FUNCS)
+            {
+                funcArray[funcCount].funcName = w2;
+                funcArray[funcCount].byteOffsetInResolveBin = cur;
+                if (w2 == "main")
+                {
+                    mainPos = cur;
+                }
+                funcCount++;
+            }
+            writeResolveRecord(fout, 0, str);
+        }
+        else if (w1 == "call")
+        {
+            if (patchCount < MAX_PATCHES)
+            {
+                patches[patchCount].byteOffsetOfOffsetField = cur;
+                patches[patchCount].targetFuncName = w2;
+                patchCount++;
+            }
+            writeResolveRecord(fout, 0, str);
+        }
+        else
+        {
+            writeResolveRecord(fout, 0, str);
+        }
+    }
+    fin.close();
+
+    if (mainPos == -1)
+    {
+        fclose(fout);
+        return -1;
+    }
+
+    for (int32_t i = 0; i < patchCount; i++)
+    {
+        for (int32_t j = 0; j < funcCount; j++)
+        {
+            if (funcArray[j].funcName == patches[i].targetFuncName)
+            {
+                fseek(fout, patches[i].byteOffsetOfOffsetField, SEEK_SET);
+                fwrite(&funcArray[j].byteOffsetInResolveBin, sizeof(int64_t), 1, fout);
+                break;
+            }
+        }
+    }
+
+    fclose(fout);
+    return mainPos;
     // Every source line becomes one record holding the raw line, as-is.
     // resolve() only PEEKS at the leading word(s) -- enough to spot FUNC
     // (remember its position) and CALL (remember which function it needs
@@ -309,6 +403,29 @@ struct Token
 };
 int32_t tokenizeLine(const string &line, Token tokens[], int32_t maxTokens)
 {
+    int32_t c = 0;
+    size_t i = 0;
+
+    while (i < line.size() && c < maxTokens)
+    {
+        while (i < line.size() && (line[i] == ' ' || line[i] == '\t' || line[i] == '\r'))
+            i++;
+
+        if (i >= line.size()) break;
+
+        size_t st = i;
+        while (i < line.size() && line[i] != ' ' && line[i] != '\t' && line[i] != '\r')
+            i++;
+
+        tokens[c].text = line.substr(st, i - st);
+
+        if (c == 0) tokens[c].type = KEYWORD;
+        else if (c == 1) tokens[c].type = IDENTIFIER;
+        else tokens[c].type = PARAM;
+
+        c++;
+    }
+    return c;
     // first word is always a instruction keyword
     // instruction set = [func, func_end, call, set, add, sub, mul and div]
     // next word is identifier like name of a function, variable name
@@ -316,10 +433,14 @@ int32_t tokenizeLine(const string &line, Token tokens[], int32_t maxTokens)
 }
 Snapshot *buildSnapshot(Stack<Frame> &callStack)
 {
+    Snapshot *snap = new Snapshot();
+    snap->stackDepth = callStack.snapshot_into(snap->callStack, MAX_STACK_DEPTH);
+    return snap;
     // build the snapshot based on the callStack given
 }
 void executeProgram(const char *resolveBinPath, int64_t mainOffset, Timeline &timeline)
 {
+   
     // initialize the call stack
     // make the main frame
     // push main frame on the call stack
